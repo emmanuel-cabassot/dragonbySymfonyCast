@@ -2,31 +2,86 @@
 
 namespace App\Entity;
 
+use ApiPlatform\Metadata\ApiFilter;
+use ApiPlatform\Metadata\ApiResource;
+use ApiPlatform\Metadata\Get;
+use ApiPlatform\Metadata\Link;
+use ApiPlatform\Serializer\Filter\PropertyFilter;
 use App\Repository\UserRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
+use Symfony\Component\Serializer\Annotation\Groups;
+use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: UserRepository::class)]
 #[ORM\Table(name: '`user`')]
+#[ApiResource(
+    normalizationContext: [
+        'groups' => ['user:read'],
+    ],
+    denormalizationContext: [
+        'groups' => ['user:write'],
+    ],
+)]
+#[ApiResource(
+    uriTemplate: '/treasures/{treasure_id}/owner.{_format}',
+    operations: [
+        new get()
+    ],
+    uriVariables: [
+        'treasure_id' => new Link(
+            fromClass: DragonTreasure::class,
+            fromProperty : 'owner'
+        )
+    ]
+)]
+#[UniqueEntity(fields: ['email'], message: "Il y a déjà un compte avec cet email !")]
+#[UniqueEntity(fields: ['username'], message: "Il y a déjà un compte avec ce nom d'utilisateur !")]
+#[ApiFilter(PropertyFilter::class)]
 class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
+    #[Groups(['user:read', 'user:write', 'treasure:item:get'])]
     private ?int $id = null;
 
     #[ORM\Column(length: 180, unique: true)]
+    #[Groups(['user:read', 'user:write', 'treasure:item:get'])]
+    #[Assert\NotBlank]
+    #[Assert\Email]
     private ?string $email = null;
 
     #[ORM\Column]
+    #[Groups(['user:read', 'treasure:item:get'])]
     private array $roles = [];
 
     /**
      * @var string The hashed password
      */
     #[ORM\Column]
+    #[Groups(['user:write'])]
+    #[Assert\Length(min: 3, max: 15)]   
     private ?string $password = null;
+
+    #[ORM\Column(length: 255, unique: true)]
+    #[Groups(['user:read', 'user:write', 'treasure:read'])]
+    #[Assert\NotBlank]
+    #[Assert\Length(min: 3, max:12)]
+    private ?string $username = null;
+
+    #[ORM\OneToMany(mappedBy: 'owner', targetEntity: DragonTreasure::class)]
+    #[Groups(['user:read'])]
+    private Collection $dragonTreasures;
+
+    public function __construct()
+    {
+        $this->dragonTreasures = new ArrayCollection();
+    }
 
     public function getId(): ?int
     {
@@ -96,5 +151,47 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     {
         // If you store any temporary, sensitive data on the user, clear it here
         // $this->plainPassword = null;
+    }
+
+    public function getUsername(): ?string
+    {
+        return $this->username;
+    }
+
+    public function setUsername(string $username): static
+    {
+        $this->username = $username;
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, DragonTreasure>
+     */
+    public function getDragonTreasures(): Collection
+    {
+        return $this->dragonTreasures;
+    }
+
+    public function addDragonTreasure(DragonTreasure $dragonTreasure): static
+    {
+        if (!$this->dragonTreasures->contains($dragonTreasure)) {
+            $this->dragonTreasures->add($dragonTreasure);
+            $dragonTreasure->setOwner($this);
+        }
+
+        return $this;
+    }
+
+    public function removeDragonTreasure(DragonTreasure $dragonTreasure): static
+    {
+        if ($this->dragonTreasures->removeElement($dragonTreasure)) {
+            // set the owning side to null (unless already changed)
+            if ($dragonTreasure->getOwner() === $this) {
+                $dragonTreasure->setOwner(null);
+            }
+        }
+
+        return $this;
     }
 }
